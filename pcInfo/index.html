@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PCスペックチェッカー</title>
+    <!-- Tailwind CSSを読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts (Noto Sans JP) を読み込み -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        /* Noto Sans JPフォントを適用 */
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen p-4">
+
+    <div class="bg-gray-800 p-8 md:p-12 rounded-2xl shadow-2xl w-full max-w-3xl text-center border border-gray-700">
+        
+        <!-- ヘッダー部分 -->
+        <header class="mb-8">
+            <svg class="w-16 h-16 mx-auto mb-4 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25Zm.75-12h9v9h-9v-9Z" />
+            </svg>
+            <h1 class="text-3xl md:text-4xl font-bold text-white">PCスペックチェッカー</h1>
+            <p class="text-gray-400 mt-2">お使いのブラウザから検出されたPCのスペック情報です。</p>
+        </header>
+
+        <!-- 結果表示エリア -->
+        <div class="space-y-4 text-left">
+            <!-- GPU -->
+            <div class="bg-gray-900 rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center sm:justify-between">
+                <span class="text-base md:text-lg font-bold text-gray-300 w-full sm:w-auto mb-2 sm:mb-0">GPU</span>
+                <p id="gpu-info" class="text-sm md:text-base font-mono text-green-400 break-words text-right w-full sm:w-auto">取得中...</p>
+            </div>
+            <!-- Hardware Acceleration -->
+            <div class="bg-gray-900 rounded-lg p-4 flex items-center justify-between">
+                <span class="text-base md:text-lg font-bold text-gray-300">ハードウェア アクセラレーション</span>
+                <p id="hw-accel-info" class="text-base md:text-lg font-mono text-green-400">取得中...</p>
+            </div>
+            <!-- CPU Cores -->
+            <div class="bg-gray-900 rounded-lg p-4 flex items-center justify-between">
+                <span class="text-base md:text-lg font-bold text-gray-300">CPU (論理コア数)</span>
+                <p id="cpu-info" class="text-base md:text-lg font-mono text-green-400">取得中...</p>
+            </div>
+        </div>
+
+        <!-- 注意書き -->
+        <footer class="mt-8">
+            <p class="text-xs text-gray-500">
+                ※この情報は、ブラウザのAPIから取得したものです。<br>
+                ※プライバシー保護のため、CPU製品名やマザーボードの情報は表示できません。
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        // ページの読み込みが完了したら実行
+        window.onload = function() {
+            const gpuInfoElement = document.getElementById('gpu-info');
+            const hwAccelInfoElement = document.getElementById('hw-accel-info');
+            const cpuInfoElement = document.getElementById('cpu-info');
+
+            // --- GPU情報とハードウェアアクセラレーションの判定 ---
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (!gl) {
+                    throw new Error('WebGL is not supported. Hardware acceleration may be disabled.');
+                }
+                
+                // WebGLコンテキストが取得できれば、アクセラレーションは有効と推定
+                hwAccelInfoElement.textContent = '有効 (推定)';
+                // 成功時は緑色のままなので、色の変更は不要
+
+                const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                let gpuString = '';
+                if (debugInfo) {
+                    gpuString = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                } else {
+                    gpuString = gl.getParameter(gl.RENDERER) || 'N/A';
+                }
+                
+                let cleanedGpu = gpuString;
+                if (gpuString.toUpperCase().includes('ANGLE')) {
+                    const angleContent = gpuString.match(/\(([^)]+)\)/);
+                    if (angleContent && angleContent[1]) {
+                        const parts = angleContent[1].split(',');
+                        if (parts.length > 1) {
+                            let name = parts[1].trim();
+                            const extras = ['(0x', 'Direct3D', 'vs_', 'ps_'];
+                            let cutIndex = -1;
+                            for (const extra of extras) {
+                                const index = name.indexOf(extra);
+                                if (index !== -1 && (cutIndex === -1 || index < cutIndex)) { cutIndex = index; }
+                            }
+                            if (cutIndex !== -1) { name = name.substring(0, cutIndex).trim(); }
+                            cleanedGpu = name;
+                        }
+                    }
+                }
+                gpuInfoElement.textContent = cleanedGpu;
+
+            } catch (e) {
+                console.error("GPU/HW Accel Error:", e);
+                gpuInfoElement.textContent = '取得不可';
+                gpuInfoElement.classList.replace('text-green-400', 'text-red-400');
+                hwAccelInfoElement.textContent = '無効または非対応';
+                hwAccelInfoElement.classList.replace('text-green-400', 'text-red-400'); // 黄色からではなく緑から赤に変更
+            }
+
+            // --- CPUコア数の取得 ---
+            if (navigator.hardwareConcurrency) {
+                cpuInfoElement.textContent = `${navigator.hardwareConcurrency} コア`;
+            } else {
+                cpuInfoElement.textContent = '取得不可';
+                cpuInfoElement.classList.replace('text-green-400', 'text-red-400');
+            }
+        };
+    </script>
+</body>
+</html>
