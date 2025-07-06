@@ -85,29 +85,41 @@
                 
                 let cleanedGpu = gpuString;
                 
-                // ANGLE形式の文字列からGPU名を抽出
+                // --- ここから修正箇所 ---
+                // ANGLE形式の文字列からGPU名を抽出するロジックを改善
                 if (gpuString.toUpperCase().includes('ANGLE')) {
-                    const angleContent = gpuString.match(/\(([^)]+)\)/);
-                    if (angleContent && angleContent[1]) {
-                        const parts = angleContent[1].split(',');
+                    // "ANGLE (" と最後の ")" の間の文字列を取得
+                    const startIndex = gpuString.indexOf('(');
+                    const endIndex = gpuString.lastIndexOf(')');
+                    
+                    if (startIndex !== -1 && endIndex > startIndex) {
+                        const angleContent = gpuString.substring(startIndex + 1, endIndex);
+                        const parts = angleContent.split(',');
+                        
                         if (parts.length > 1) {
-                            let name = parts[1].trim();
+                            // 2番目の要素にGPU名が含まれていると仮定
+                            let name = parts[1].trim(); 
+                            
+                            // 不要な詳細情報 (デバイスID, APIバージョン等) を削除
                             const extras = ['(0x', 'Direct3D', 'vs_', 'ps_'];
                             let cutIndex = -1;
                             for (const extra of extras) {
                                 const index = name.indexOf(extra);
-                                if (index !== -1 && (cutIndex === -1 || index < cutIndex)) { cutIndex = index; }
+                                if (index !== -1 && (cutIndex === -1 || index < cutIndex)) {
+                                    cutIndex = index;
+                                }
                             }
-                            if (cutIndex !== -1) { name = name.substring(0, cutIndex).trim(); }
+                            if (cutIndex !== -1) {
+                                name = name.substring(0, cutIndex).trim();
+                            }
                             cleanedGpu = name;
                         }
                     }
                 }
+                // --- 修正箇所ここまで ---
 
-                // --- ここから修正箇所 ---
                 // (R)や(TM)などの記号を削除して表示を整える
                 cleanedGpu = cleanedGpu.replace(/\s*\((R|TM)\)/gi, '').trim();
-                // --- 修正箇所ここまで ---
 
                 gpuInfoElement.textContent = cleanedGpu;
 
