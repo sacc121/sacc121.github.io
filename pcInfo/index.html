@@ -73,9 +73,7 @@
                     throw new Error('WebGL is not supported. Hardware acceleration may be disabled.');
                 }
                 
-                // WebGLコンテキストが取得できれば、アクセラレーションは有効と推定
                 hwAccelInfoElement.textContent = '有効 (推定)';
-                // 成功時は緑色のままなので、色の変更は不要
 
                 const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
                 let gpuString = '';
@@ -86,6 +84,8 @@
                 }
                 
                 let cleanedGpu = gpuString;
+                
+                // ANGLE形式の文字列からGPU名を抽出
                 if (gpuString.toUpperCase().includes('ANGLE')) {
                     const angleContent = gpuString.match(/\(([^)]+)\)/);
                     if (angleContent && angleContent[1]) {
@@ -103,6 +103,12 @@
                         }
                     }
                 }
+
+                // --- ここから修正箇所 ---
+                // (R)や(TM)などの記号を削除して表示を整える
+                cleanedGpu = cleanedGpu.replace(/\s*\((R|TM)\)/gi, '').trim();
+                // --- 修正箇所ここまで ---
+
                 gpuInfoElement.textContent = cleanedGpu;
 
             } catch (e) {
@@ -110,7 +116,7 @@
                 gpuInfoElement.textContent = '取得不可';
                 gpuInfoElement.classList.replace('text-green-400', 'text-red-400');
                 hwAccelInfoElement.textContent = '無効または非対応';
-                hwAccelInfoElement.classList.replace('text-green-400', 'text-red-400'); // 黄色からではなく緑から赤に変更
+                hwAccelInfoElement.classList.replace('text-green-400', 'text-red-400');
             }
 
             // --- CPUコア数の取得 ---
