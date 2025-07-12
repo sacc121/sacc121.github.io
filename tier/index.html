@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Player Tier List (Local Storage)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        /* 基本スタイルの設定 */
+        body {
+            font-family: 'Noto Sans JP', 'Inter', sans-serif;
+            background-color: #1a1a1a;
+            color: #f0f0f0;
+        }
+        /* ドラッグ中の要素のスタイル */
+        .dragging {
+            opacity: 0.5;
+            transform: scale(1.05);
+        }
+        /* ドロップゾーンのハイライト */
+        .drag-over {
+            border-style: dashed;
+            border-color: #fcd34d; /* gold-400 */
+        }
+        /* Tierラベルのグラデーションテキスト */
+        .tier-label-text {
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+        /* スクロールバーのスタイル */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #2d2d2d;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #777;
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div id="app" class="container mx-auto p-4 md:p-8 min-h-screen">
+        <!-- ヘッダー -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold bg-gradient-to-r from-yellow-300 via-yellow-400 to-yellow-500 tier-label-text">
+                Player Tier List
+            </h1>
+            <p class="text-gray-400 mt-2">プレイヤーをドラッグ＆ドロップで評価しよう</p>
+        </header>
+
+        <!-- Tierリスト -->
+        <div id="tier-list-container" class="space-y-3">
+            <!-- TierはJSによってここに生成されます -->
+        </div>
+
+        <!-- 未分類プレイヤーのプール -->
+        <div class="mt-8 p-4 bg-gray-800/50 rounded-lg shadow-lg">
+            <h2 class="text-2xl font-bold text-gray-300 mb-4 border-b-2 border-gray-700 pb-2">プレイヤーリスト</h2>
+            <div id="player-pool" class="tier-dropzone min-h-[80px] p-2 rounded-md bg-gray-900/70 flex flex-wrap gap-3 items-start transition-all duration-300">
+                <!-- プレイヤーはJSによってここに生成されます -->
+            </div>
+        </div>
+
+        <!-- プレイヤー追加ボタン -->
+        <div class="fixed bottom-8 right-8">
+            <button id="add-player-btn" class="bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-3 px-6 rounded-full shadow-lg transform hover:scale-105 transition-all duration-300">
+                プレイヤーを追加
+            </button>
+        </div>
+
+        <!-- プレイヤー追加モーダル -->
+        <div id="player-modal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center hidden z-50 transition-opacity duration-300">
+            <div class="bg-gray-800 rounded-lg shadow-2xl p-8 w-full max-w-md mx-4 transform scale-95 transition-transform duration-300">
+                <h2 class="text-2xl font-bold mb-6 text-yellow-400">新しいプレイヤーを追加</h2>
+                <form id="add-player-form">
+                    <input type="text" id="player-name-input" placeholder="プレイヤー名" class="w-full bg-gray-700 border-2 border-gray-600 rounded-md py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition" required>
+                    <p id="error-message" class="text-red-400 text-sm mt-2 h-5"></p>
+                    <div class="flex justify-end mt-4 space-x-4">
+                        <button type="button" id="cancel-btn" class="py-2 px-6 bg-gray-600 hover:bg-gray-500 rounded-md transition-colors">キャンセル</button>
+                        <button type="submit" class="py-2 px-6 bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold rounded-md transition-colors">追加</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // --- グローバル変数の設定 ---
+        let currentTierData = null;
+
+        // --- DOM要素の取得 ---
+        const tierListContainer = document.getElementById('tier-list-container');
+        const playerPool = document.getElementById('player-pool');
+        const addPlayerBtn = document.getElementById('add-player-btn');
+        const playerModal = document.getElementById('player-modal');
+        const addPlayerForm = document.getElementById('add-player-form');
+        const playerNameInput = document.getElementById('player-name-input');
+        const cancelBtn = document.getElementById('cancel-btn');
+        const errorMessage = document.getElementById('error-message');
+
+        // --- Tierの定義 ---
+        const tiers = {
+            S: { label: 'S', color: 'bg-red-600', textColor: 'text-red-300', gradient: 'from-red-500 to-orange-400' },
+            A: { label: 'A', color: 'bg-orange-500', textColor: 'text-orange-300', gradient: 'from-orange-400 to-amber-400' },
+            B: { label: 'B', color: 'bg-yellow-500', textColor: 'text-yellow-300', gradient: 'from-yellow-400 to-lime-400' },
+            C: { label: 'C', color: 'bg-green-500', textColor: 'text-green-300', gradient: 'from-green-400 to-teal-400' },
+            D: { label: 'D', color: 'bg-blue-500', textColor: 'text-blue-300', gradient: 'from-blue-400 to-indigo-400' },
+            E: { label: 'E', color: 'bg-purple-500', textColor: 'text-purple-300', gradient: 'from-purple-400 to-fuchsia-400' },
+        };
+        
+        // --- 初期プレイヤーデータ ---
+        const initialPlayerNames = [
+            'ka9dai', 'astra', 'haruyoshi', 'Miyama', 'YuzukiFYS', 'dotjp', 'Saka', 
+            'ossdekasaihassei', 'poyo', 'saltone', 'smiss', 'takoyaki', 'void', 
+            'Nisheeeeee', 'ogakiyakou9391M'
+        ];
+        const initialData = {
+            S: [], A: [], B: [], C: [], D: [], E: [],
+            pool: initialPlayerNames.map((name, index) => ({
+                id: `player-initial-${index}`,
+                name: name
+            }))
+        };
+
+        // --- 初期化処理 ---
+        function initialize() {
+            loadDataFromLocalStorage();
+            renderTierList(currentTierData);
+        }
+        
+        // --- ローカルストレージからデータを読み込む ---
+        function loadDataFromLocalStorage() {
+            const savedData = localStorage.getItem('playerTierData');
+            if (savedData) {
+                currentTierData = JSON.parse(savedData);
+            } else {
+                currentTierData = initialData;
+            }
+        }
+
+        // --- UIの描画 ---
+        function renderTierList(data) {
+            if (!data) return;
+            tierListContainer.innerHTML = '';
+
+            // Tierの描画
+            Object.keys(tiers).forEach(tierKey => {
+                const tierInfo = tiers[tierKey];
+                const tierElement = document.createElement('div');
+                tierElement.className = 'flex items-stretch min-h-[70px] bg-gray-800/50 rounded-lg shadow-lg';
+                
+                const labelElement = document.createElement('div');
+                labelElement.className = `${tierInfo.color} flex items-center justify-center w-20 md:w-24 rounded-l-lg`;
+                labelElement.innerHTML = `<span class="text-3xl md:text-4xl font-bold bg-gradient-to-br ${tierInfo.gradient} tier-label-text">${tierInfo.label}</span>`;
+                
+                const dropzone = document.createElement('div');
+                dropzone.id = `tier-${tierKey}`;
+                dropzone.className = 'tier-dropzone flex-1 p-2 flex flex-wrap gap-3 items-start rounded-r-lg transition-all duration-300';
+                
+                const playersInTier = data[tierKey] || [];
+                playersInTier.forEach(player => {
+                    dropzone.appendChild(createPlayerElement(player));
+                });
+                
+                tierElement.appendChild(labelElement);
+                tierElement.appendChild(dropzone);
+                tierListContainer.appendChild(tierElement);
+            });
+
+            // 未分類プレイヤーの描画
+            playerPool.innerHTML = '';
+            const playersInPool = data.pool || [];
+            playersInPool.forEach(player => {
+                playerPool.appendChild(createPlayerElement(player));
+            });
+
+            // ドラッグ＆ドロップのイベントリスナーを再設定
+            setupDragAndDrop();
+        }
+
+        // --- プレイヤー要素の作成 ---
+        function createPlayerElement(player) {
+            const playerEl = document.createElement('div');
+            playerEl.id = player.id;
+            playerEl.className = 'player-card bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-md cursor-grab shadow-md transition-all duration-200 flex items-center gap-2';
+            playerEl.draggable = true;
+            
+            const playerNameSpan = document.createElement('span');
+            playerNameSpan.textContent = player.name;
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.innerHTML = '&#x2715;'; // ×マーク
+            deleteBtn.className = 'text-gray-400 hover:text-red-400 text-xs opacity-50 hover:opacity-100 transition-opacity';
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation(); // ドラッグイベントを発生させない
+                deletePlayer(player.id);
+            };
+            
+            playerEl.appendChild(playerNameSpan);
+            playerEl.appendChild(deleteBtn);
+            
+            return playerEl;
+        }
+
+        // --- ドラッグ＆ドロップのセットアップ ---
+        function setupDragAndDrop() {
+            const playerCards = document.querySelectorAll('.player-card');
+            const dropzones = document.querySelectorAll('.tier-dropzone');
+            let draggedItem = null;
+
+            playerCards.forEach(card => {
+                card.addEventListener('dragstart', (e) => {
+                    draggedItem = e.target;
+                    setTimeout(() => e.target.classList.add('dragging'), 0);
+                    e.dataTransfer.setData('text/plain', e.target.id);
+                });
+
+                card.addEventListener('dragend', (e) => {
+                    e.target.classList.remove('dragging');
+                    draggedItem = null; // ドラッグ終了時にリセット
+                });
+            });
+
+            dropzones.forEach(zone => {
+                let dragCounter = 0;
+
+                zone.addEventListener('dragenter', e => {
+                    e.preventDefault();
+                    dragCounter++;
+                    zone.classList.add('drag-over');
+                });
+
+                zone.addEventListener('dragleave', e => {
+                    e.preventDefault();
+                    dragCounter--;
+                    if (dragCounter === 0) {
+                        zone.classList.remove('drag-over');
+                    }
+                });
+
+                zone.addEventListener('dragover', e => {
+                    // dropイベントを発生させるために必須
+                    e.preventDefault();
+                });
+
+                zone.addEventListener('drop', e => {
+                    e.preventDefault();
+                    dragCounter = 0;
+                    zone.classList.remove('drag-over');
+                    const id = e.dataTransfer.getData('text/plain');
+                    const draggableElement = document.getElementById(id);
+                    if (draggableElement && draggedItem) {
+                        zone.appendChild(draggableElement);
+                        updateAndSaveTierData();
+                    }
+                    draggedItem = null;
+                });
+            });
+        }
+        
+        // --- データの更新と保存 ---
+        function updateAndSaveTierData() {
+            const newData = { S: [], A: [], B: [], C: [], D: [], E: [], pool: [] };
+            
+            document.querySelectorAll('.tier-dropzone').forEach(zone => {
+                const tierKey = zone.id === 'player-pool' ? 'pool' : zone.id.split('-')[1];
+                
+                zone.querySelectorAll('.player-card').forEach(card => {
+                    const playerName = card.querySelector('span').textContent;
+                    newData[tierKey].push({ id: card.id, name: playerName });
+                });
+            });
+
+            currentTierData = newData;
+            saveTierListToLocalStorage();
+        }
+
+        // --- プレイヤーの削除 ---
+        function deletePlayer(playerId) {
+            let found = false;
+            for (const key in currentTierData) {
+                const index = currentTierData[key].findIndex(p => p.id === playerId);
+                if (index > -1) {
+                    currentTierData[key].splice(index, 1);
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (found) {
+                saveTierListToLocalStorage();
+                renderTierList(currentTierData); // UIを即時更新
+            }
+        }
+
+        // --- ローカルストレージにデータを保存 ---
+        function saveTierListToLocalStorage() {
+            if (!currentTierData) return;
+            localStorage.setItem('playerTierData', JSON.stringify(currentTierData));
+        }
+
+        // --- モーダルの表示/非表示 ---
+        function showModal() {
+            playerModal.classList.remove('hidden');
+            setTimeout(() => {
+                playerModal.classList.remove('opacity-0');
+                playerModal.querySelector('div').classList.remove('scale-95');
+            }, 10);
+        }
+
+        function hideModal() {
+            playerModal.classList.add('opacity-0');
+            playerModal.querySelector('div').classList.add('scale-95');
+            setTimeout(() => {
+                playerModal.classList.add('hidden');
+                playerNameInput.value = '';
+                errorMessage.textContent = ''; // エラーメッセージをクリア
+            }, 300);
+        }
+        
+        // --- イベントリスナー ---
+        addPlayerBtn.addEventListener('click', showModal);
+        cancelBtn.addEventListener('click', hideModal);
+        playerModal.addEventListener('click', (e) => {
+            if (e.target === playerModal) {
+                hideModal();
+            }
+        });
+
+        addPlayerForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            errorMessage.textContent = ''; // 既存のエラーをクリア
+            const playerName = playerNameInput.value.trim();
+
+            if (!playerName) return;
+
+            // 全てのプレイヤーを一つの配列に結合して重複をチェック
+            const allPlayers = Object.values(currentTierData).flat();
+            const isDuplicate = allPlayers.some(player => player.name.toLowerCase() === playerName.toLowerCase());
+
+            if (isDuplicate) {
+                errorMessage.textContent = '同じ名前のプレイヤーが既に存在します。';
+                return;
+            }
+
+            // 新しいプレイヤーを追加
+            const newPlayer = {
+                id: `player-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                name: playerName
+            };
+            currentTierData.pool.push(newPlayer);
+            
+            saveTierListToLocalStorage(); // 更新されたデータを保存
+            renderTierList(currentTierData); // UIを再描画
+            hideModal();
+        });
+
+        // --- アプリケーションの開始 ---
+        initialize();
+
+    </script>
+</body>
+</html>
