@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Git Diff Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: #111827;
+            color: #d1d5db;
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .diff-font { font-family: 'Menlo', 'Monaco', 'Courier New', monospace; }
+        .fade-in { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* ファイルツリーのスタイル */
+        .file-tree .folder-toggle { cursor: pointer; display: flex; align-items: center; padding: 4px 8px; border-radius: 4px; }
+        .file-tree .folder-toggle:hover { background-color: #374151; }
+        .file-tree .folder-toggle .arrow { transition: transform 0.2s; flex-shrink: 0; }
+        .file-tree .folder-toggle.expanded .arrow { transform: rotate(90deg); }
+        .file-tree .file-link { display: flex; align-items: center; padding: 4px 8px; border-radius: 4px; }
+        .file-tree .file-link:hover { background-color: #374151; }
+        .file-tree .nested { padding-left: 20px; }
+        .file-tree .active { background-color: #1d4ed8; color: #ffffff; }
+        
+        /* 初期状態と読み込み後のレイアウト制御 */
+        #app-container[data-state="initial"] #sidebar,
+        #app-container[data-state="initial"] #hamburger-btn {
+            display: none;
+        }
+        #app-container[data-state="initial"] #main-content {
+            margin-left: 0 !important;
+        }
+
+        /* 共有ボタンとツールチップ */
+        .share-tooltip {
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .share-tooltip.visible {
+            visibility: visible;
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div id="app-container" data-state="initial">
+        <!-- ハンバーガーメニューボタン (モバイル用) -->
+        <div class="md:hidden flex justify-between items-center bg-gray-900 p-2 text-white sticky top-0 z-20">
+            <h2 id="mobile-header-title" class="text-lg font-bold truncate px-2">ファイル一覧</h2>
+            <button id="hamburger-btn" class="p-2 focus:outline-none focus:bg-gray-700 rounded">
+                <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
+            </button>
+        </div>
+
+        <!-- サイドバー (ファイルツリー) -->
+        <nav id="sidebar" class="fixed top-0 left-0 h-full w-72 bg-gray-900 text-white transform -translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out z-30 flex flex-col">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <div>
+                    <h2 class="text-xl font-bold">変更されたファイル</h2>
+                    <p id="file-name-display" class="text-sm text-gray-400 mt-1 truncate"></p>
+                </div>
+                <div class="relative">
+                    <button id="share-btn" title="共有URLをコピー" class="p-2 rounded-md hover:bg-gray-700 transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12s-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z"></path></svg>
+                    </button>
+                    <div id="share-tooltip" class="share-tooltip absolute right-0 mt-2 w-max px-2 py-1 bg-green-600 text-white text-xs rounded shadow-lg">
+                        コピーしました！
+                    </div>
+                </div>
+            </div>
+            <div id="file-list-container" class="flex-1 overflow-y-auto p-2 file-tree"></div>
+        </nav>
+
+        <!-- メインコンテンツ -->
+        <main id="main-content" class="flex-1 md:ml-72 p-4 md:p-8 transition-all duration-300 ease-in-out">
+            <header class="text-center mb-8">
+                <h1 class="text-4xl md:text-5xl font-bold text-white mb-2">Git Diff Viewer</h1>
+                <p class="text-lg text-gray-400">`git diff` のファイルをアップロードして、差分を分かりやすく表示します。</p>
+            </header>
+
+            <div id="input-section" class="mb-8">
+                <div id="dropzone" class="mt-2 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-600 border-dashed rounded-lg cursor-pointer hover:border-blue-500 transition-colors duration-200 bg-gray-900/50">
+                    <div class="space-y-1 text-center"><svg class="mx-auto h-12 w-12 text-gray-500" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg><div class="flex text-sm text-gray-400"><p class="pl-1">ファイルを選択するか、ここにドラッグしてください</p></div><p class="text-xs text-gray-500">`.diff`, `.patch`, またはプレーンテキストファイル</p></div>
+                    <input id="file-upload" type="file" class="sr-only">
+                </div>
+            </div>
+
+            <div id="output-section">
+                <div id="diff-container" class="space-y-8"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const appContainer = document.getElementById('app-container');
+        const dropzone = document.getElementById('dropzone');
+        const fileUpload = document.getElementById('file-upload');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const diffContainer = document.getElementById('diff-container');
+        const sidebar = document.getElementById('sidebar');
+        const hamburgerBtn = document.getElementById('hamburger-btn');
+        const fileListContainer = document.getElementById('file-list-container');
+        const mainContent = document.getElementById('main-content');
+        const mobileHeaderTitle = document.getElementById('mobile-header-title');
+        const shareBtn = document.getElementById('share-btn');
+        const shareTooltip = document.getElementById('share-tooltip');
+
+        let rawDiffText = '';
+
+        // --- イベントリスナー ---
+        hamburgerBtn.addEventListener('click', () => sidebar.classList.toggle('-translate-x-full'));
+        dropzone.addEventListener('click', () => fileUpload.click());
+        dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('border-blue-500'); });
+        dropzone.addEventListener('dragleave', () => dropzone.classList.remove('border-blue-500'));
+        dropzone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropzone.classList.remove('border-blue-500');
+            if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+        });
+        fileUpload.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+        shareBtn.addEventListener('click', copyShareURL);
+
+        // --- 初期化処理 ---
+        window.addEventListener('DOMContentLoaded', loadDiffFromURL);
+
+        function processDiffText(text, sourceName) {
+            if (!text || !text.trim()) {
+                alert('差分データが空か、内容を読み取れませんでした。');
+                return;
+            }
+            rawDiffText = text;
+            fileNameDisplay.textContent = sourceName;
+            mobileHeaderTitle.textContent = sourceName;
+            appContainer.dataset.state = 'loaded';
+            diffContainer.innerHTML = '';
+            fileListContainer.innerHTML = '';
+            
+            const files = parseDiff(text);
+            renderFileTree(files);
+            renderDiffs(files);
+            updateURLWithDiff(text);
+        }
+
+        function handleFile(file) {
+            fileNameDisplay.textContent = `読み込み中: ${file.name}`;
+            mobileHeaderTitle.textContent = '読み込み中...';
+            const reader = new FileReader();
+            reader.onload = e => processDiffText(e.target.result, file.name);
+            reader.onerror = () => {
+                alert('ファイルの読み込み中にエラーが発生しました。');
+                fileNameDisplay.textContent = '読み込み失敗';
+            };
+            reader.readAsText(file);
+        }
+        
+        function parseDiff(diffText) {
+            const files = [];
+            let currentFile = null;
+            for (const line of diffText.split('\n')) {
+                if (line.startsWith('diff --git')) {
+                    if (currentFile) files.push(currentFile);
+                    const bPath = line.substring(line.indexOf(' b/') + 3);
+                    currentFile = { name: bPath, hunks: [] };
+                } else if (line.startsWith('@@')) {
+                    const parts = line.match(/@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@/);
+                    if(parts && currentFile) {
+                        currentFile.hunks.push({ lines: [], oldStartLine: parseInt(parts[1], 10), newStartLine: parseInt(parts[4], 10) });
+                    }
+                } else if (currentFile && currentFile.hunks.length > 0 && (line.startsWith('+') || line.startsWith('-') || line.startsWith(' '))) {
+                    const type = line.startsWith('+') ? 'add' : (line.startsWith('-') ? 'del' : 'context');
+                    currentFile.hunks[currentFile.hunks.length - 1].lines.push({ text: line, type: type });
+                }
+            }
+            if (currentFile) files.push(currentFile);
+            return files;
+        }
+
+        function renderFileTree(files) {
+            const tree = buildTree(files);
+            const treeElement = createTreeElement(tree, files);
+            fileListContainer.appendChild(treeElement);
+            addTreeEventListeners();
+        }
+
+        function buildTree(files) {
+            const root = {};
+            files.forEach((file, index) => {
+                const parts = file.name.split('/');
+                let currentNode = root;
+                parts.forEach((part, i) => {
+                    if (i === parts.length - 1) {
+                        currentNode[part] = { isFile: true, anchor: `#file-diff-${index}`, name: file.name };
+                    } else {
+                        currentNode[part] = currentNode[part] || { isFile: false, children: {} };
+                        currentNode = currentNode[part].children;
+                    }
+                });
+            });
+            return root;
+        }
+
+        function createTreeElement(node, files, isSubtree = false) {
+            const ul = document.createElement('ul');
+            if (isSubtree) ul.className = 'nested';
+
+            const sortedKeys = Object.keys(node).sort((a, b) => {
+                const aIsFile = node[a].isFile;
+                const bIsFile = node[b].isFile;
+                if (aIsFile && !bIsFile) return 1;
+                if (!aIsFile && bIsFile) return -1;
+                return a.localeCompare(b);
+            });
+
+            for (const key of sortedKeys) {
+                const item = node[key];
+                const li = document.createElement('li');
+                if (item.isFile) {
+                    li.innerHTML = `<a href="${item.anchor}" class="file-link" data-filename="${item.name}"><svg class="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg><span class="truncate">${key}</span></a>`;
+                } else {
+                    li.innerHTML = `<div class="folder-toggle expanded"><svg class="arrow w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg><svg class="w-4 h-4 mx-1 text-yellow-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg><span class="truncate">${key}</span></div>`;
+                    li.appendChild(createTreeElement(item.children, files, true));
+                }
+                ul.appendChild(li);
+            }
+            return ul;
+        }
+        
+        function addTreeEventListeners() {
+            fileListContainer.querySelectorAll('.folder-toggle').forEach(toggle => {
+                toggle.addEventListener('click', (e) => {
+                    e.currentTarget.classList.toggle('expanded');
+                    const nestedList = e.currentTarget.nextElementSibling;
+                    if (nestedList) nestedList.classList.toggle('hidden');
+                });
+            });
+        }
+
+        function renderDiffs(files) {
+            if (files.length === 0) {
+                diffContainer.innerHTML = '<p class="text-center text-yellow-400 p-8">有効な差分情報が見つかりませんでした。</p>';
+                return;
+            }
+            files.forEach((file, index) => {
+                const fileDiv = document.createElement('div');
+                fileDiv.id = `file-diff-${index}`;
+                fileDiv.className = 'bg-gray-800 border border-gray-700 rounded-lg overflow-hidden fade-in';
+                
+                const fileHeader = document.createElement('div');
+                fileHeader.className = 'p-3 bg-gray-900 border-b border-gray-700 text-white font-semibold flex items-center sticky top-12 md:top-auto z-10';
+                fileHeader.innerHTML = `<svg class="w-5 h-5 mr-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg><span>${escapeHtml(file.name)}</span>`;
+                fileDiv.appendChild(fileHeader);
+
+                file.hunks.forEach(hunk => {
+                    const table = document.createElement('table');
+                    table.className = 'w-full diff-font text-sm';
+                    const tbody = document.createElement('tbody');
+                    let oldLineNum = hunk.oldStartLine, newLineNum = hunk.newStartLine, rows = [], i = 0;
+                    while (i < hunk.lines.length) {
+                        const line = hunk.lines[i];
+                        if (line.type === 'context') { rows.push({ left: { n: oldLineNum++, t: line.text.substring(1), type: 'context' }, right: { n: newLineNum++, t: line.text.substring(1), type: 'context' } }); i++;
+                        } else if (line.type === 'del') {
+                            let delBlock = [], addBlock = [];
+                            while (i < hunk.lines.length && hunk.lines[i].type === 'del') { delBlock.push({ n: oldLineNum++, t: hunk.lines[i].text.substring(1) }); i++; }
+                            while (i < hunk.lines.length && hunk.lines[i].type === 'add') { addBlock.push({ n: newLineNum++, t: hunk.lines[i].text.substring(1) }); i++; }
+                            for (let j = 0; j < Math.max(delBlock.length, addBlock.length); j++) { rows.push({ left: delBlock[j] ? { ...delBlock[j], type: 'del' } : { type: 'empty' }, right: addBlock[j] ? { ...addBlock[j], type: 'add' } : { type: 'empty' } }); }
+                        } else if (line.type === 'add') { rows.push({ left: { type: 'empty' }, right: { n: newLineNum++, t: line.text.substring(1), type: 'add' } }); i++; }
+                    }
+                    rows.forEach(row => {
+                        const tr = document.createElement('tr');
+                        let lc = 'border-gray-700/50', rc = 'border-gray-700/50';
+                        if (row.left.type === 'del') lc = 'bg-red-900/40';
+                        if (row.right.type === 'add') rc = 'bg-green-900/40';
+                        tr.innerHTML = `<td class="w-10 text-right pr-2 select-none text-gray-500 border-r ${lc}">${row.left.n || ''}</td><td class="w-1/2 pr-4 pl-2 ${lc}"><pre class="whitespace-pre-wrap break-all">${escapeHtml(row.left.t || '')}</pre></td><td class="w-10 text-right pr-2 select-none text-gray-500 border-r ${rc}">${row.right.n || ''}</td><td class="w-1/2 pr-4 pl-2 ${rc}"><pre class="whitespace-pre-wrap break-all">${escapeHtml(row.right.t || '')}</pre></td>`;
+                        tbody.appendChild(tr);
+                    });
+                    table.appendChild(tbody);
+                    fileDiv.appendChild(table);
+                });
+                diffContainer.appendChild(fileDiv);
+            });
+            activateScrollSpy();
+        }
+
+        function activateScrollSpy() {
+            const fileDivs = diffContainer.querySelectorAll('[id^="file-diff-"]');
+            const fileLinks = fileListContainer.querySelectorAll('a.file-link');
+            const onScroll = () => {
+                let currentActiveId = null;
+                const scrollPosition = mainContent.scrollTop + mainContent.offsetTop + 150;
+                fileDivs.forEach(div => { if (div.offsetTop <= scrollPosition) currentActiveId = div.id; });
+                fileLinks.forEach(link => {
+                    link.classList.remove('active');
+                    if (currentActiveId && link.getAttribute('href') === `#${currentActiveId}`) link.classList.add('active');
+                });
+            };
+            mainContent.addEventListener('scroll', onScroll);
+        }
+
+        // --- 共有機能 ---
+        function updateURLWithDiff(text) {
+            try {
+                const compressed = pako.deflate(text);
+                let binaryString = '';
+                compressed.forEach(byte => { binaryString += String.fromCharCode(byte); });
+                const encoded = btoa(binaryString).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+                const newUrl = `${window.location.pathname}?diff=${encoded}`;
+                history.pushState({ diff: text }, '', newUrl);
+            } catch (err) {
+                console.error('URLの更新に失敗しました:', err);
+            }
+        }
+
+        async function copyShareURL() {
+            if (!rawDiffText) {
+                alert('共有する差分データがありません。');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                shareTooltip.classList.add('visible');
+                setTimeout(() => shareTooltip.classList.remove('visible'), 2000);
+            } catch (err) {
+                console.error('URLのコピーに失敗しました:', err);
+                alert('URLのコピーに失敗しました。');
+            }
+        }
+
+        function loadDiffFromURL() {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const diffData = params.get('diff');
+
+                if (diffData) {
+                    let encoded = diffData.replace(/-/g, '+').replace(/_/g, '/');
+                    while (encoded.length % 4) { encoded += '='; }
+                    
+                    const binaryString = atob(encoded);
+                    const len = binaryString.length;
+                    const bytes = new Uint8Array(len);
+                    for (let i = 0; i < len; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+
+                    const decompressed = pako.inflate(bytes, { to: 'string' });
+                    processDiffText(decompressed, '共有された差分');
+                }
+            } catch (err) {
+                console.error('URLからの差分の読み込みに失敗しました:', err);
+                alert('共有された差分の読み込みに失敗しました。URLが破損している可能性があります。');
+            }
+        }
+
+        function escapeHtml(text) { return text ? text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;") : ''; }
+    </script>
+</body>
+</html>
