@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2026 New Year Countdown</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background: radial-gradient(circle at center, #1a1a2e 0%, #0f0f1a 100%);
+            font-family: 'Noto+Sans+JP', sans-serif;
+            overflow: hidden;
+            color: #fff;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 2rem;
+        }
+        .number-font {
+            font-family: 'Playfair Display', serif;
+        }
+        .glow {
+            text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+        }
+        .content {
+            position: relative;
+            z-index: 10;
+        }
+        .year-transition {
+            transition: all 1s ease-in-out;
+        }
+        .shimmer {
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            background-size: 200% 100%;
+            animation: shimmer 3s infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+    </style>
+</head>
+<body class="h-screen flex items-center justify-center">
+    <canvas id="fireworksCanvas"></canvas>
+
+    <div class="content text-center px-4 w-full max-w-4xl">
+        <div id="countdown-ui" class="space-y-8">
+            <h1 id="main-title" class="text-3xl md:text-5xl font-light tracking-widest mb-4 opacity-90">
+                COUNTDOWN TO <span class="font-bold text-yellow-400">2026</span>
+            </h1>
+            
+            <div class="glass p-8 md:p-12 shadow-2xl">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8">
+                    <div class="flex flex-col">
+                        <span id="days" class="number-font text-5xl md:text-8xl font-bold glow">00</span>
+                        <span class="text-xs md:text-sm uppercase tracking-widest mt-2 opacity-60">Days</span>
+                    </div>
+                    <div class="flex flex-col">
+                        <span id="hours" class="number-font text-5xl md:text-8xl font-bold glow">00</span>
+                        <span class="text-xs md:text-sm uppercase tracking-widest mt-2 opacity-60">Hours</span>
+                    </div>
+                    <div class="flex flex-col">
+                        <span id="minutes" class="number-font text-5xl md:text-8xl font-bold glow">00</span>
+                        <span class="text-xs md:text-sm uppercase tracking-widest mt-2 opacity-60">Minutes</span>
+                    </div>
+                    <div class="flex flex-col">
+                        <span id="seconds" class="number-font text-5xl md:text-8xl font-bold glow text-yellow-500">00</span>
+                        <span class="text-xs md:text-sm uppercase tracking-widest mt-2 opacity-60">Seconds</span>
+                    </div>
+                </div>
+            </div>
+
+            <p class="text-lg md:text-xl font-light tracking-widest opacity-70">
+                2025 <span class="mx-4">→</span> 2026
+            </p>
+        </div>
+
+        <div id="celebration-ui" class="hidden space-y-8 animate-bounce">
+            <h2 class="text-6xl md:text-9xl font-bold number-font glow text-yellow-400">
+                2026
+            </h2>
+            <h1 class="text-4xl md:text-6xl font-bold tracking-widest">
+                HAPPY NEW YEAR!
+            </h1>
+            <p class="text-xl md:text-2xl font-light">あけましておめでとうございます</p>
+            <button onclick="resetTimer()" class="mt-8 px-8 py-3 glass hover:bg-white/10 transition-colors tracking-widest text-sm">
+                REPLAY CELEBRATION
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const targetDate = new Date('January 1, 2026 00:00:00').getTime();
+        
+        function updateCountdown() {
+            const now = new Date().getTime();
+            const distance = targetDate - now;
+
+            if (distance < 0) {
+                showCelebration();
+                return;
+            }
+
+            const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+            document.getElementById('days').innerText = String(days).padStart(2, '0');
+            document.getElementById('hours').innerText = String(hours).padStart(2, '0');
+            document.getElementById('minutes').innerText = String(minutes).padStart(2, '0');
+            document.getElementById('seconds').innerText = String(seconds).padStart(2, '0');
+        }
+
+        function showCelebration() {
+            document.getElementById('countdown-ui').classList.add('hidden');
+            document.getElementById('celebration-ui').classList.remove('hidden');
+            startFireworks();
+        }
+
+        function resetTimer() {
+            // For demo purposes, if they want to see the fireworks again
+            startFireworks();
+        }
+
+        // --- Fireworks Engine ---
+        const canvas = document.getElementById('fireworksCanvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.velocity = {
+                    x: (Math.random() - 0.5) * 8,
+                    y: (Math.random() - 0.5) * 8
+                };
+                this.alpha = 1;
+                this.friction = 0.95;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.restore();
+            }
+
+            update() {
+                this.velocity.x *= this.friction;
+                this.velocity.y *= this.friction;
+                this.velocity.y += 0.05; // gravity
+                this.x += this.velocity.x;
+                this.y += this.velocity.y;
+                this.alpha -= 0.01;
+            }
+        }
+
+        function createFirework(x, y) {
+            const colors = ['#ff0000', '#ffd700', '#ffffff', '#00ff00', '#0000ff', '#ff00ff'];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            for (let i = 0; i < 100; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        let isCelebrating = false;
+        function startFireworks() {
+            isCelebrating = true;
+            setInterval(() => {
+                if (isCelebrating) {
+                    createFirework(Math.random() * canvas.width, Math.random() * canvas.height * 0.5);
+                }
+            }, 500);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            ctx.fillStyle = 'rgba(15, 15, 26, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            particles.forEach((particle, index) => {
+                if (particle.alpha > 0) {
+                    particle.update();
+                    particle.draw();
+                } else {
+                    particles.splice(index, 1);
+                }
+            });
+        }
+
+        setInterval(updateCountdown, 1000);
+        updateCountdown();
+        animate();
+    </script>
+</body>
+</html>
